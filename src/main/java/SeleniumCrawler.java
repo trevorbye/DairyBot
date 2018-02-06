@@ -30,7 +30,7 @@ public class SeleniumCrawler {
             }
         };
 
-        driver.get("https://app.dairy.com/fusion/Moo?skin=18&usageType=C&build=Login&forceLogout=true");
+        driver.get("removed_for_security");
 
         login(driver);
 
@@ -77,8 +77,8 @@ public class SeleniumCrawler {
     }
 
     private void login(WebDriver driver) {
-        String username = "dreporting";
-        String password = "Fun_Reports@1";
+        String username = "removed";
+        String password = "removed";
 
         //wait for form to load
         waitUntilVisible(driver, By.className("form-horizontal"), 10);
