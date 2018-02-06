@@ -1,6 +1,7 @@
 import com.gargoylesoftware.htmlunit.BrowserVersion;
 import com.gargoylesoftware.htmlunit.WebClient;
 import org.openqa.selenium.By;
+import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.htmlunit.HtmlUnitDriver;
@@ -15,6 +16,7 @@ import java.util.*;
 import static org.apache.commons.lang3.time.DateUtils.*;
 
 public class SeleniumCrawler {
+
 
     public List<ScrapeDataEntity> crawl() {
 
@@ -41,6 +43,39 @@ public class SeleniumCrawler {
         return routeAndPlantList;
     }
 
+    public OrderScheduleAndMilkSupplyWrapper crawlForScript2() {
+        OrderScheduleAndMilkSupplyWrapper wrapper = new OrderScheduleAndMilkSupplyWrapper();
+
+        WebDriver driver = new HtmlUnitDriver(BrowserVersion.CHROME, true) {
+
+            @Override
+            protected WebClient newWebClient(BrowserVersion version) {
+                WebClient client = super.newWebClient(version);
+                client.getOptions().setThrowExceptionOnScriptError(false);
+                return client;
+            }
+        };
+
+        driver.get("https://app.dairy.com/fusion/Moo?skin=18&usageType=C&build=Login&forceLogout=true");
+
+        login(driver);
+        navigateToOrdersPage(driver);
+
+        //build first week into list
+        List<OrderScheduleScrapeDataEntity> scrapeDataEntities = scrapeOrders(driver);
+
+        //append second week to first list
+        scrapeDataEntities.addAll(switchDateAndScrapeOrders(driver));
+        wrapper.setScheduleScrapeDataEntityList(scrapeDataEntities);
+
+        //change page and scrape truck counts
+        navigateToMilkSupplyPageFromWithinMilk(driver);
+        HashMap<Date, Integer> truckCountMap = scrapeMilkSupplyTruckCounts(driver);
+        wrapper.setMilkSupplyTruckCountMap(truckCountMap);
+
+        return wrapper;
+    }
+
     private void login(WebDriver driver) {
         String username = "dreporting";
         String password = "Fun_Reports@1";
@@ -61,6 +96,219 @@ public class SeleniumCrawler {
         submitButtonElement.click();
     }
 
+    private void navigateToOrdersPage(WebDriver driver) {
+        waitUntilVisible(driver, By.id("toptabs"), 10);
+
+        //click on milk
+        WebElement linkAnchor = driver.findElement(By.xpath("//*[@id='toptabs']/table/tbody/tr/td[1]/a"));
+        linkAnchor.click();
+
+        //click on order schedule
+        waitUntilVisible(driver, By.id("dispatchRegionDiv"), 10);
+        WebElement orderScheduleAnchor = driver.findElement(By.xpath("//*[@id='dispatchRegionDiv']/table/tbody/tr[4]/td/a"));
+        orderScheduleAnchor.click();
+    }
+
+    private void navigateToMilkSupplyPageFromWithinMilk(WebDriver driver) {
+
+        //click on milk anchor
+        WebElement milkAnchor = driver.findElement(By.xpath("//*[@id='toptabs']/table/tbody/tr/th/a"));
+        milkAnchor.click();
+
+        //click on supply schedule
+        waitUntilVisible(driver, By.id("dispatchRegionDiv"), 10);
+        WebElement supplyScheduleAnchor = driver.findElement(By.xpath("//*[@id='dispatchRegionDiv']/table/tbody/tr[2]/td/a"));
+        supplyScheduleAnchor.click();
+
+    }
+
+    private List<OrderScheduleScrapeDataEntity> scrapeOrders(WebDriver driver) {
+
+        //wait for table visibility
+        waitUntilVisible(driver, By.id("scheduleTable"), 10);
+
+        //find startDate and parse
+        WebElement startDateTableCell = driver.findElement(By.xpath("//*[@id='interval-0']/table/tbody/tr[2]/th[1]"));
+        String startDateAsString = startDateTableCell.getText();
+        //add current year to date string
+        startDateAsString += ("/" + Calendar.getInstance().get(Calendar.YEAR));
+
+        DateFormat format = new SimpleDateFormat("MM/dd/yyyy", Locale.ENGLISH);
+        Date startDate = null;
+
+        try {
+            startDate = format.parse(startDateAsString);
+        } catch (ParseException e) {
+            e.printStackTrace();
+        }
+
+        //get table and extract all <tr> tags
+        WebElement mainTable = driver.findElement(By.xpath("//*[@id='scheduleTable']/tbody"));
+        List<WebElement> tableRows = mainTable.findElements(By.tagName("tr"));
+
+        //build list to store data, keep track of running plant name
+        List<OrderScheduleScrapeDataEntity> orderScheduleScrapeDataEntityList = new ArrayList<>();
+        String currentPlant = "none";
+
+        for (WebElement row : tableRows) {
+            if (row.isDisplayed()) {
+                String currentRowId = row.getAttribute("id");
+                Date runningdate = startDate;
+
+                //avoid null pointer if tr does not have an id attribute
+                if (currentRowId == null) {
+                    currentRowId = "";
+                }
+
+                //get current plant; use as running variable
+                if (currentRowId.startsWith("topic")) {
+                    WebElement plantAnchor = row.findElement(By.xpath(".//td[1]/a"));
+                    String currentAchorId = plantAnchor.getAttribute("id");
+
+                    currentPlant = plantAnchor.getText();
+                    continue;
+                }
+
+                //get header cell text
+                WebElement headerTag = row.findElement(By.xpath(".//th[1]"));
+                String headerText = headerTag.getText();
+
+                if (headerText.equals("Orders")) {
+                    //get all <td> tags
+                    List<WebElement> cells = row.findElements(By.tagName("td"));
+
+                    for (WebElement cell : cells) {
+                        String cellClass = cell.getAttribute("class");
+
+                        if (cellClass.equals(" mcol") || cellClass.equals(" lcol")) {
+                            WebElement span = null;
+
+                            try {
+                                span = cell.findElement(By.tagName("span"));
+                            } catch (Exception ignored) {
+                            }
+
+                            if (span != null) {
+                                String spanText = span.getText();
+                                long orderQuantityPounds = Long.valueOf(spanText.replaceAll(",", ""));
+                                long truckCount = 0;
+
+                                if (orderQuantityPounds != 0) {
+                                    if (orderQuantityPounds < 70000) {
+                                        truckCount = 1;
+                                    } else {
+                                        truckCount = orderQuantityPounds / 70000;
+                                    }
+
+                                    OrderScheduleScrapeDataEntity entity = new OrderScheduleScrapeDataEntity();
+                                    entity.setTruckCount(truckCount);
+                                    entity.setPlantCode(currentPlant);
+                                    entity.setOrderDate(runningdate);
+
+                                    orderScheduleScrapeDataEntityList.add(entity);
+                                }
+                            }
+
+                            //increment runningDate
+                            runningdate = addDays(runningdate, 1);
+                        }
+                    }
+                }
+            }
+        }
+        return orderScheduleScrapeDataEntityList;
+    }
+
+    private List<OrderScheduleScrapeDataEntity> switchDateAndScrapeOrders(WebDriver driver) {
+        //create current date, add 7 days convert to string
+        Date currentDate = new Date();
+        currentDate = addDays(currentDate, 7);
+        DateFormat dateFormat = new SimpleDateFormat("MM/dd/yyyy");
+        String currentDateAsString = dateFormat.format(currentDate);
+
+        //find date input box and clear
+        WebElement dateInput = driver.findElement(By.xpath("/html/body/div[3]/form[1]/div[1]/table/tbody/tr/td[1]/input[3]"));
+        dateInput.clear();
+        dateInput.sendKeys(currentDateAsString);
+
+        //find go button and click
+        WebElement goButton = driver.findElement(By.xpath("/html/body/div[3]/form[1]/div[1]/table/tbody/tr/td[1]/input[4]"));
+        goButton.click();
+
+        return scrapeOrders(driver);
+    }
+
+    private HashMap<Date, Integer> scrapeMilkSupplyTruckCounts(WebDriver driver) {
+        HashMap<Date, Integer> truckCountMap = new HashMap<>();
+
+        //wait for table visibility
+        waitUntilVisible(driver, By.id("scheduleTable"), 10);
+
+        //find startDate and parse
+        WebElement startDateTableCell = driver.findElement(By.xpath("//*[@id='interval-0']/table/tbody/tr[2]/th[1]"));
+        String startDateAsString = startDateTableCell.getText();
+        //add current year to date string
+        startDateAsString += ("/" + Calendar.getInstance().get(Calendar.YEAR));
+
+        DateFormat format = new SimpleDateFormat("MM/dd/yyyy", Locale.ENGLISH);
+        Date startDate = null;
+
+        try {
+            startDate = format.parse(startDateAsString);
+        } catch (ParseException e) {
+            e.printStackTrace();
+        }
+
+        //get table and extract all <tr> tags
+        WebElement mainTable = driver.findElement(By.xpath("//*[@id='scheduleTable']/tbody"));
+        List<WebElement> tableRows = mainTable.findElements(By.tagName("tr"));
+
+        for (WebElement row : tableRows) {
+            Date runningDate = startDate;
+
+            if (row.isDisplayed()) {
+                WebElement tableHeaderTag = null;
+
+                try {
+                    tableHeaderTag = row.findElement(By.xpath(".//th[1]"));
+                } catch (Exception ignored){
+                }
+
+                if (tableHeaderTag != null) {
+                    String tagText = tableHeaderTag.getText();
+
+                    if (tagText.equals("Total Trucks")) {
+                        List<WebElement> tdtags = row.findElements(By.tagName("td"));
+
+                        for (WebElement tag : tdtags) {
+                            if (tag.getAttribute("class").equals(" mcol bold") || tag.getAttribute("class").equals(" lcol bold")) {
+                                String cellText = tag.getText();
+
+                                if (!cellText.equals(" ")) {
+                                    Integer truckCount = Integer.valueOf(cellText);
+
+                                    if (truckCountMap.containsKey(runningDate)) {
+                                        Integer currentTruckCount = truckCountMap.get(runningDate);
+
+                                        currentTruckCount = currentTruckCount + truckCount;
+                                        truckCountMap.put(runningDate, currentTruckCount);
+                                    } else {
+                                        truckCountMap.put(runningDate, truckCount);
+                                    }
+                                }
+
+                                runningDate = addDays(runningDate, 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return truckCountMap;
+    }
+
+    //used for first script
     private List<ScrapeDataEntity> navigate(WebDriver driver) {
         waitUntilVisible(driver, By.id("toptabs"), 10);
 
@@ -72,7 +320,7 @@ public class SeleniumCrawler {
         WebElement supplyAnchor = driver.findElement(By.xpath("//*[@id='dispatchRegionDiv']/table/tbody/tr[2]/td/a"));
         supplyAnchor.click();
 
-        // wait for visible and clikc detail dropdown
+        // wait for visible and click detail dropdown
         waitUntilVisible(driver, By.id("sch-view-det"), 10);
         WebElement detailDropdown = driver.findElement(By.id("sch-view-det"));
         detailDropdown.click();
