@@ -1,30 +1,27 @@
 import java.io.FileNotFoundException;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 
 public class DairyController {
 
-    public static void main(String[] args) throws FileNotFoundException {
+    public static void main(String[] args) throws SQLException, ClassNotFoundException {
         SeleniumCrawler crawler = new SeleniumCrawler();
 
-        //milk demand script
-        /*
-        ApachePOIExcelWrite excelWrite = new ApachePOIExcelWrite();
-        excelWrite.writeExcelFile(crawler.crawl());
-        */
-
-        //orders script
-        OrderScheduleAndMilkSupplyWrapper wrapper = crawler.crawlForScript2();
-
-        for (OrderScheduleScrapeDataEntity entity : wrapper.getScheduleScrapeDataEntityList()) {
-            System.out.println(entity.getPlantCode() + " : " + entity.getOrderDate() + " : " + entity.getTruckCount());
+        List<ReportScrapeEntity> reportScrapeEntityList = new ArrayList<>();
+        try {
+            reportScrapeEntityList = crawler.crawlForScheduleReport();
+        } catch (Exception e) {
+            //send error notification email
         }
 
-        for (Map.Entry<Date, Integer> entry : wrapper.getMilkSupplyTruckCountMap().entrySet()) {
-            System.out.println(entry.getKey().toString() + " : " + entry.getValue());
+        try {
+            MySQLService.loadResultSetToDatabase(reportScrapeEntityList);
+        } catch (Exception e) {
+            //send error notification email
         }
 
-        ApachePOIExcelWrite excelWrite = new ApachePOIExcelWrite();
-        excelWrite.manipulateExcelFileForScript2(wrapper);
     }
 }

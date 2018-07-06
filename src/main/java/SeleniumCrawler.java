@@ -17,6 +17,129 @@ import static org.apache.commons.lang3.time.DateUtils.*;
 
 public class SeleniumCrawler {
 
+    public List<ReportScrapeEntity> crawlForScheduleReport() throws InterruptedException {
+
+        WebDriver driver = new HtmlUnitDriver(BrowserVersion.CHROME, true) {
+
+            @Override
+            protected WebClient newWebClient(BrowserVersion version) {
+                WebClient client = super.newWebClient(version);
+                client.getOptions().setThrowExceptionOnScriptError(false);
+                return client;
+            }
+        };
+
+        driver.get("https://app.dairy.com/fusion/Moo?skin=1&usageType=C&build=Login&forceLogout=true");
+        login(driver);
+
+        waitUntilVisible(driver, By.id("toptabs"), 10);
+
+        //click on milk
+        WebElement linkAnchor = driver.findElement(By.xpath("//*[@id='toptabs']/table/tbody/tr/td[1]/a"));
+        linkAnchor.click();
+
+        waitUntilVisible(driver, By.id("subtabs"), 10);
+
+        //store current window
+        String parentWindowHandle = driver.getWindowHandle();
+
+        //click on reports
+        WebElement reportAnchor = driver.findElement(By.xpath("//*[@id='subtabs']/table/tbody/tr/td[1]/a"));
+        reportAnchor.click();
+
+        //switch to new window
+        for (String windowHandle : driver.getWindowHandles()) {
+            if (!windowHandle.equals(parentWindowHandle)) {
+                driver.switchTo().window(windowHandle);
+            }
+        }
+
+        //wait for iframe
+        Thread.sleep(10000);
+
+        //switch to iframe
+        driver.switchTo().frame(0);
+        Thread.sleep(6000);
+        driver.switchTo().frame(0);
+        Thread.sleep(6000);
+        driver.switchTo().frame("treeFrame");
+
+        //click on milk within iframe
+        Thread.sleep(3000);
+        WebElement milkAnchor = driver.findElement(By.xpath("//*[@id='parent']/div/div/div[2]/div[11]/div[1]/table/tbody/tr/td[2]"));
+        milkAnchor.click();
+
+        Thread.sleep(2000);
+
+        //click on scheduling within iframe
+        WebElement schAnchor = driver.findElement(By.xpath("//*[@id='parent']/div/div/div[2]/div[11]/div[2]/div[2]/div[1]/table/tbody/tr/td[3]"));
+        schAnchor.click();
+
+        Thread.sleep(2000);
+
+        //click on milk arrival status within iframe
+        WebElement finalAnchor = driver.findElement(By.xpath("//*[@id='parent']/div/div/div[2]/div[11]/div[2]/div[2]/div[2]/div[6]/div[1]/table/tbody/tr/td[6]/div"));
+        finalAnchor.click();
+
+        //switch back to default iframe then switch to report iframe
+        driver.switchTo().defaultContent();
+
+        //wait for iframe
+        Thread.sleep(10000);
+        driver.switchTo().frame(0);
+        Thread.sleep(10000);
+        driver.switchTo().frame(0);
+        Thread.sleep(10000);
+        driver.switchTo().frame(2);
+        Thread.sleep(10000);
+        driver.switchTo().frame(0);
+
+        //click next button
+        WebElement button = driver.findElement(By.xpath("//*[@id='divArea0_3']/input[7]"));
+        button.click();
+
+        //click run report
+        waitUntilVisible(driver, By.id("divArea0_12"), 10);
+        WebElement runReportButton = driver.findElement(By.xpath("//*[@id='divArea0_12']/input[9]"));
+        runReportButton.click();
+
+        /*
+        //switch back to default iframe then switch to report iframe
+        driver.switchTo().defaultContent();
+
+        //wait for iframe
+        waitUntilVisible(driver, By.id("propFrame"), 10);
+        driver.switchTo().frame("reportiframe");
+        */
+
+        //get table and extract all <tr> tags
+        List<ReportScrapeEntity> reportScrapeEntityList = new ArrayList<>();
+
+        waitUntilVisible(driver, By.id("divArea0_0"), 20);
+        WebElement mainTable = driver.findElement(By.xpath("//*[@id='divArea0_0']/table/tbody"));
+        List<WebElement> tableRows = mainTable.findElements(By.tagName("tr"));
+
+        //used to skip first two rows
+        int x = 0;
+        for (WebElement row : tableRows) {
+            if (x > 1) {
+
+                ReportScrapeEntity entity = new ReportScrapeEntity();
+
+                entity.setReceivingPlant(row.findElement(By.xpath(".//td[3]/span/font")).getText());
+                entity.setReceivedDate(row.findElement(By.xpath(".//td[6]/span/font")).getText());
+                entity.setReceivedTime(row.findElement(By.xpath(".//td[7]/span/font")).getText());
+                entity.setRouteNumber(row.findElement(By.xpath(".//td[9]/span/font")).getText());
+                entity.setHaulerDesc(row.findElement(By.xpath(".//td[10]/span/font")).getText());
+
+                reportScrapeEntityList.add(entity);
+            } else {
+                x++;
+            }
+        }
+
+        return reportScrapeEntityList;
+    }
 
     public List<ScrapeDataEntity> crawl() {
 
@@ -77,8 +200,8 @@ public class SeleniumCrawler {
     }
 
     private void login(WebDriver driver) {
-        String username = "removed";
-        String password = "removed";
+        String username = "dreporting";
+        String password = "Fun_Reports@2";
 
         //wait for form to load
         waitUntilVisible(driver, By.className("form-horizontal"), 10);
